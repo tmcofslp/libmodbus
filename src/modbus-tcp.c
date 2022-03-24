@@ -307,19 +307,21 @@ static int _modbus_tcp_connect(modbus_t *ctx)
     struct sockaddr_in addr;
     modbus_tcp_t *ctx_tcp = ctx->backend_data;
     int flags = SOCK_STREAM;
-
 #ifdef OS_WIN32
     if (_modbus_tcp_init_win32() == -1) {
         return -1;
     }
 #endif
 
+#ifndef DISABLE_MODERN_SOCKET_FLAGS
 #ifdef SOCK_CLOEXEC
     flags |= SOCK_CLOEXEC;
 #endif
 
+ 
 #ifdef SOCK_NONBLOCK
     flags |= SOCK_NONBLOCK;
+#endif
 #endif
 
     ctx->s = socket(PF_INET, flags, 0);
@@ -343,6 +345,9 @@ static int _modbus_tcp_connect(modbus_t *ctx)
     addr.sin_addr.s_addr = inet_addr(ctx_tcp->ip);
     rc = _connect(ctx->s, (struct sockaddr *)&addr, sizeof(addr), &ctx->response_timeout);
     if (rc == -1) {
+      if (ctx->debug) {
+        fprintf(stderr, "Connecting to %s:%d, failed 0x%x, %s\n", ctx_tcp->ip, ctx_tcp->port, errno, strerror(errno));
+      }
         close(ctx->s);
         ctx->s = -1;
         return -1;
@@ -391,6 +396,7 @@ static int _modbus_tcp_pi_connect(modbus_t *ctx)
         int flags = ai_ptr->ai_socktype;
         int s;
 
+#ifndef DISABLE_MODERN_SOCKET_FLAGS        
 #ifdef SOCK_CLOEXEC
         flags |= SOCK_CLOEXEC;
 #endif
@@ -398,7 +404,7 @@ static int _modbus_tcp_pi_connect(modbus_t *ctx)
 #ifdef SOCK_NONBLOCK
         flags |= SOCK_NONBLOCK;
 #endif
-
+#endif 
         s = socket(ai_ptr->ai_family, flags, ai_ptr->ai_protocol);
         if (s < 0)
             continue;
@@ -500,9 +506,11 @@ int modbus_tcp_listen(modbus_t *ctx, int nb_connection)
 
     flags = SOCK_STREAM;
 
-#ifdef SOCK_CLOEXEC
+
+#if defined(SOCK_CLOEXEC) && !defined(DISABLE_MODERN_SOCKET_FLAGS)
     flags |= SOCK_CLOEXEC;
 #endif
+
 
     new_s = socket(PF_INET, flags, IPPROTO_TCP);
     if (new_s == -1) {
@@ -603,7 +611,7 @@ int modbus_tcp_pi_listen(modbus_t *ctx, int nb_connection)
         int flags = ai_ptr->ai_socktype;
         int s;
 
-#ifdef SOCK_CLOEXEC
+#if defined(SOCK_CLOEXEC) && !defined(DISABLE_MODERN_SOCKET_FLAGS)
         flags |= SOCK_CLOEXEC;
 #endif
 
@@ -667,7 +675,7 @@ int modbus_tcp_accept(modbus_t *ctx, int *s)
     }
 
     addrlen = sizeof(addr);
-#ifdef HAVE_ACCEPT4
+#if defined(HAVE_ACCEPT4) && !defined(DISABLE_MODERN_SOCKET_FLAGS)
     /* Inherit socket flags and use accept4 call */
     ctx->s = accept4(*s, (struct sockaddr *)&addr, &addrlen, SOCK_CLOEXEC);
 #else
@@ -697,7 +705,7 @@ int modbus_tcp_pi_accept(modbus_t *ctx, int *s)
     }
 
     addrlen = sizeof(addr);
-#ifdef HAVE_ACCEPT4
+#if defined(HAVE_ACCEPT4) && !defined(DISABLE_MODERN_SOCKET_FLAGS)
     /* Inherit socket flags and use accept4 call */
     ctx->s = accept4(*s, (struct sockaddr *)&addr, &addrlen, SOCK_CLOEXEC);
 #else

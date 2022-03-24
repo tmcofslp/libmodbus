@@ -25,7 +25,7 @@
 
 /* Internal use */
 #define MSG_LENGTH_UNDEFINED -1
-
+#define FUNC_ERR_OFFSET (0x80)
 /* Exported version */
 const unsigned int libmodbus_version_major = LIBMODBUS_VERSION_MAJOR;
 const unsigned int libmodbus_version_minor = LIBMODBUS_VERSION_MINOR;
@@ -529,9 +529,9 @@ static int check_confirmation(modbus_t *ctx, uint8_t *req,
     rsp_length_computed = compute_response_length_from_request(ctx, req);
 
     /* Exception code */
-    if (function >= 0x80) {
+    if (function >= FUNC_ERR_OFFSET) {
         if (rsp_length == (offset + 2 + (int)ctx->backend->checksum_length) &&
-            req[offset] == (rsp[offset] - 0x80)) {
+            req[offset] == (rsp[offset] - FUNC_ERR_OFFSET)) {
             /* Valid exception code received */
 
             int exception_code = rsp[offset + 1];
@@ -552,7 +552,7 @@ static int check_confirmation(modbus_t *ctx, uint8_t *req,
     /* Check length */
     if ((rsp_length == rsp_length_computed ||
          rsp_length_computed == MSG_LENGTH_UNDEFINED) &&
-        function < 0x80) {
+        function < FUNC_ERR_OFFSET) {
         int req_nb_value;
         int rsp_nb_value;
 
@@ -688,7 +688,7 @@ static int response_exception(modbus_t *ctx, sft_t *sft,
     }
 
     /* Build exception response */
-    sft->function = sft->function + 0x80;
+    sft->function = sft->function + FUNC_ERR_OFFSET;
     rsp_length = ctx->backend->build_response_basis(sft, rsp);
     rsp[rsp_length++] = exception_code;
 
@@ -711,7 +711,7 @@ int modbus_reply(modbus_t *ctx, const uint8_t *req,
     uint8_t rsp[MAX_MESSAGE_LENGTH];
     int rsp_length = 0;
     sft_t sft;
-
+    int ret = -1;
     if (ctx == NULL) {
         errno = EINVAL;
         return -1;
@@ -995,10 +995,56 @@ int modbus_reply(modbus_t *ctx, const uint8_t *req,
             "Unknown Modbus function code: 0x%0X\n", function);
         break;
     }
-
     /* Suppress any responses when the request was a broadcast */
-    return (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU &&
+    ret = (ctx->backend->backend_type == _MODBUS_BACKEND_TYPE_RTU &&
             slave == MODBUS_BROADCAST_ADDRESS) ? 0 : send_msg(ctx, rsp, rsp_length);
+            
+    if(ctx->wr_reply_cb != (modbus_cb_wr_func) NULL) {
+        ctx->wr_reply_cb(ctx, req, req_length, rsp, rsp_length, sft.function);
+    }
+
+    return ret;
+    
+    
+}
+
+int modbus_set_wr_reply_cb(modbus_t *ctx, modbus_cb_wr_func _func)
+{
+        if(ctx == NULL) {
+                errno = EINVAL;
+                return -1;
+        }
+        ctx->wr_reply_cb = _func;
+        return 0;
+}
+
+
+uint8_t modbus_function_is_write(int func_to_check)
+{
+    int write_funcs[] = {MODBUS_FC_WRITE_SINGLE_COIL,
+        MODBUS_FC_WRITE_SINGLE_REGISTER,     
+        MODBUS_FC_WRITE_MULTIPLE_COILS,      
+        MODBUS_FC_WRITE_MULTIPLE_REGISTERS,  
+        MODBUS_FC_MASK_WRITE_REGISTER,
+        MODBUS_FC_WRITE_AND_READ_REGISTERS};
+        
+   size_t i_c=0;
+   uint8_t ret=FALSE;
+   
+   for(i_c=0; i_c < (sizeof(write_funcs) / sizeof(write_funcs[0])); i_c++) {
+       if(write_funcs[i_c] == func_to_check) {
+           ret=TRUE;
+           break;
+       }
+   }
+   
+   return ret;          
+            
+}
+        
+uint8_t modbus_function_is_error(int func_to_check)
+{
+        return (func_to_check > FUNC_ERR_OFFSET) ? TRUE : FALSE;
 }
 
 int modbus_reply_exception(modbus_t *ctx, const uint8_t *req,
@@ -1022,7 +1068,7 @@ int modbus_reply_exception(modbus_t *ctx, const uint8_t *req,
     function = req[offset];
 
     sft.slave = slave;
-    sft.function = function + 0x80;
+    sft.function = function + FUNC_ERR_OFFSET;
     sft.t_id = ctx->backend->prepare_response_tid(req, &dummy_length);
     rsp_length = ctx->backend->build_response_basis(&sft, rsp);
 
@@ -1388,13 +1434,22 @@ int modbus_write_registers(modbus_t *ctx, int addr, int nb, const uint16_t *src)
 
     rc = send_msg(ctx, req, req_length);
     if (rc > 0) {
-        uint8_t rsp[MAX_MESSAGE_LENGTH];
-
-        rc = _modbus_receive_msg(ctx, rsp, MSG_CONFIRMATION);
+        uint8_t rsp[MAX_MESSAGE_LENGTH] = {0};
+        
+        rc = _modbus_receive_msg(ctx, rsp, MSG_CONFIRMATION);     
+       
+        if(ctx->wr_reply_cb != ((modbus_cb_wr_func) NULL)) {
+            ctx->wr_reply_cb(ctx, req, req_length, rsp, rc, 0);
+        }
+        
         if (rc == -1)
             return -1;
 
         rc = check_confirmation(ctx, req, rsp, rc);
+    } else {
+        if(ctx->wr_reply_cb != ((modbus_cb_wr_func) NULL)) {
+            ctx->wr_reply_cb(ctx, req, req_length, NULL, 0, rc);
+        }
     }
 
     return rc;
@@ -1577,6 +1632,7 @@ void _modbus_init_common(modbus_t *ctx)
 
     ctx->indication_timeout.tv_sec = 0;
     ctx->indication_timeout.tv_usec = 0;
+    ctx->wr_reply_cb = (modbus_cb_wr_func) NULL;
 }
 
 /* Define the slave number */

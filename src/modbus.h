@@ -154,6 +154,9 @@ extern const unsigned int libmodbus_version_micro;
 
 typedef struct _modbus modbus_t;
 
+// functions includes if error or not! dk@paul.eu 22-03-11
+
+typedef void (*modbus_cb_wr_func) (modbus_t *ctx, const uint8_t* query, int query_size, const uint8_t* rsp, int rsp_size, int misc);
 typedef struct _modbus_mapping_t {
     int nb_bits;
     int start_bits;
@@ -237,6 +240,11 @@ MODBUS_API int modbus_reply(modbus_t *ctx, const uint8_t *req,
                             int req_length, modbus_mapping_t *mb_mapping);
 MODBUS_API int modbus_reply_exception(modbus_t *ctx, const uint8_t *req,
                                       unsigned int exception_code);
+
+MODBUS_API int modbus_set_wr_reply_cb(modbus_t *ctx, modbus_cb_wr_func _func);
+
+MODBUS_API uint8_t modbus_function_is_write(int func_to_check);
+MODBUS_API uint8_t modbus_function_is_error(int func_to_check);
 
 /**
  * UTILS FUNCTIONS

@@ -109,7 +109,6 @@ AC_CHECK_FUNCS([accept4 getaddrinfo gettimeofday inet_ntoa select socket strerro
 
 # Required for MinGW with GCC v4.8.1 on Win7
 AC_DEFINE(WINVER, 0x0501, _)
-
 # Required for bswap
 AC_C_INLINE
 
@@ -154,6 +153,18 @@ AC_ARG_ENABLE(tests,
 	[enable_tests=yes])
 AM_CONDITIONAL(BUILD_TESTS, [test $enable_tests != no])
 
+AC_ARG_ENABLE(modern-socket-flags,
+    AS_HELP_STRING([--disable-modern-socket-flags],
+        [disable nonblocking, close-on-exec on sockets (default: no)]),,
+        [disable_modern_socket_flags=no])
+
+if test "$disable_modern_socket_flags" != "no"; then
+    disable_modern_socket_flags="yes"
+    AC_DEFINE([DISABLE_MODERN_SOCKET_FLAGS], [1], 
+        [this disables socket flags like SOCK_CLOEXEC AND SOCK_NONBLOCK which is not
+        working on a buggy older linux socket implementation system ])
+fi
+
 AC_CONFIG_HEADERS([config.h tests/unit-test.h])
 AC_CONFIG_FILES([
         Makefile
@@ -181,4 +192,5 @@ AC_MSG_RESULT([
 
         documentation:          ${ac_libmodbus_build_doc}
         tests:                  ${enable_tests}
+        old-socket-flags:       ${disable_modern_socket_flags}
 ])
